@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Live subtitles",
+    "description": "Transcribe and translate what the computer is playing and show it in a native window that can float always on top or sit on the desktop as a widget. Two audio sources: system audio (recommended; captures the computer's own playback with no speakers and without occupying the microphone; requires Screen Recording permission on first use) and microphone (fallback). The native helper draws either an always-on-top floating window or a desktop widget; both can be dragged and resized by text size. The panel is history-first with controls in a settings area and switches both/translation/original and the target language. Recognition runs on this machine with SenseVoice from the Voice input plugin; The engine can be High quality (DeepSeek Flash, streaming with recent context; recognized text goes to DeepSeek and uses a few tokens per line) or Fast (anonymous Bing)."
+  }
+}

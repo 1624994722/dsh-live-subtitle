@@ -1,0 +1,11 @@
+# Built native helper (rebuilt by CI / native/build.sh)
+bin/live-subtitle-helper
+bin/live-subtitle-helper.exe
+
+# Release artifacts
+dist/
+
+# Tooling
+node_modules/
+.DS_Store
+*.log

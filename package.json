@@ -1,0 +1,45 @@
+{
+  "name": "@local/live-subtitle",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH live subtitles: transcribe and translate what is playing, in a floating or desktop window",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "bin",
+    "native",
+    "locale/*.json",
+    "README.md",
+    "LICENSE",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  },
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "subtitles",
+    "translation",
+    "live"
+  ],
+  "engines": {
+    "dsh": ">=0.2.2-rc.3"
+  }
+}
