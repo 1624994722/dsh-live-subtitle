@@ -63,6 +63,19 @@ window.__ModuleLoader__.load({
       source: '声音来源',
       settings: '设置',
       engine: '翻译引擎',
+      sourceLanguage: '源语言',
+      sourceAuto: '自动识别',
+      sourceJa: '日语',
+      sourceEn: '英语',
+      sourceZh: '中文',
+      sourceYue: '粤语',
+      sourceKo: '韩语',
+      style: '翻译风格',
+      polish: '深度润色',
+      polishOn: '开启（更自然）',
+      polishOff: '关闭（更快）',
+      styleNatural: '自然口语',
+      styleFaithful: '忠实直译',
       engineSmart: '高质量',
       engineFast: '快速',
       surface: '显示位置',
@@ -131,6 +144,19 @@ window.__ModuleLoader__.load({
       source: 'Audio source',
       settings: 'Settings',
       engine: 'Engine',
+      sourceLanguage: 'Source language',
+      sourceAuto: 'Auto',
+      sourceJa: 'Japanese',
+      sourceEn: 'English',
+      sourceZh: 'Chinese',
+      sourceYue: 'Cantonese',
+      sourceKo: 'Korean',
+      style: 'Style',
+      polish: 'Polish',
+      polishOn: 'On (more natural)',
+      polishOff: 'Off (faster)',
+      styleNatural: 'Natural',
+      styleFaithful: 'Faithful',
       engineSmart: 'High quality',
       engineFast: 'Fast',
       surface: 'Placement',
@@ -527,6 +553,9 @@ window.__ModuleLoader__.load({
         source: 'system',
         surface: 'floating',
         engine: 'smart',
+        sourceLanguage: 'auto',
+        style: 'natural',
+        polish: true,
         micDeviceId: '',
         size: 'normal',
         x: Math.max(12, Math.round(window.innerWidth - 592)),
@@ -546,6 +575,9 @@ window.__ModuleLoader__.load({
           source: ['system', 'mic'].includes(parsed.source) ? parsed.source : defaults.source,
           surface: ['floating', 'desktop'].includes(parsed.surface) ? parsed.surface : defaults.surface,
           engine: ['smart', 'fast'].includes(parsed.engine) ? parsed.engine : defaults.engine,
+          sourceLanguage: ['auto', 'ja', 'en', 'zh', 'yue', 'ko'].includes(parsed.sourceLanguage) ? parsed.sourceLanguage : defaults.sourceLanguage,
+          style: ['natural', 'faithful'].includes(parsed.style) ? parsed.style : defaults.style,
+          polish: typeof parsed.polish === 'boolean' ? parsed.polish : defaults.polish,
           micDeviceId: typeof parsed.micDeviceId === 'string' ? parsed.micDeviceId : defaults.micDeviceId,
           size: ['normal', 'tall', 'compact'].includes(parsed.size) ? parsed.size : defaults.size,
           x: Number.isFinite(parsed.x) ? clamp(parsed.x, 0, window.innerWidth - 180) : defaults.x,
@@ -796,6 +828,9 @@ window.__ModuleLoader__.load({
           target: current.target,
           surface: current.surface,
           engine: current.engine,
+          sourceLanguage: current.sourceLanguage,
+          style: current.style,
+          polish: current.polish,
         }, 15000, controller.signal)
         lastSeqRef.current = 0
         stopPolling()
@@ -889,10 +924,13 @@ window.__ModuleLoader__.load({
             target: settings.target,
             surface: settings.surface,
             engine: settings.engine,
+            sourceLanguage: settings.sourceLanguage,
+            style: settings.style,
+            polish: settings.polish,
           }, 8000).catch(() => undefined)
         }, 250)
         return () => { window.clearTimeout(timer) }
-      }, [settings.font, settings.mode, settings.target, settings.surface, settings.engine])
+      }, [settings.font, settings.mode, settings.target, settings.surface, settings.engine, settings.sourceLanguage, settings.style, settings.polish])
 
       React.useEffect(() => {
         const element = listRef.current
@@ -948,7 +986,7 @@ window.__ModuleLoader__.load({
         try {
           const result = await postJson(ROUTES.transcribe, {
             audioBase64: toBase64(wav),
-            language: 'auto',
+            language: settingsRef.current.sourceLanguage,
           }, 45000, session.signal)
           text = String(result.text ?? '').trim()
         } catch (failure) {
@@ -973,6 +1011,9 @@ window.__ModuleLoader__.load({
             text,
             targetLanguage: settingsRef.current.target,
             engine: settingsRef.current.engine,
+            sourceLanguage: settingsRef.current.sourceLanguage,
+            style: settingsRef.current.style,
+            polish: settingsRef.current.polish,
           }, 25000, session.signal)
           setEntries((previous) => previous.map((entry) => entry.id === id
             ? { ...entry, translation: String(result.text ?? ''), state: 'done' }
@@ -1362,6 +1403,21 @@ window.__ModuleLoader__.load({
           h('div', { className: 'ls-field' }, h('span', null, tr('engine')),
             selectField(settings.engine, [['smart', tr('engineSmart')], ['fast', tr('engineFast')]],
               (event) => { patch({ engine: event.target.value }) }, false)),
+          h('div', { className: 'ls-field' }, h('span', null, tr('sourceLanguage')),
+            selectField(settings.sourceLanguage, [
+              ['auto', tr('sourceAuto')],
+              ['ja', tr('sourceJa')],
+              ['en', tr('sourceEn')],
+              ['zh', tr('sourceZh')],
+              ['yue', tr('sourceYue')],
+              ['ko', tr('sourceKo')],
+            ], (event) => { patch({ sourceLanguage: event.target.value }) }, live || busy)),
+          h('div', { className: 'ls-field' }, h('span', null, tr('style')),
+            selectField(settings.style, [['natural', tr('styleNatural')], ['faithful', tr('styleFaithful')]],
+              (event) => { patch({ style: event.target.value }) }, false)),
+          h('div', { className: 'ls-field' }, h('span', null, tr('polish')),
+            selectField(settings.polish ? 'on' : 'off', [['on', tr('polishOn')], ['off', tr('polishOff')]],
+              (event) => { patch({ polish: event.target.value === 'on' }) }, false)),
           h('div', { className: 'ls-field' }, h('span', null, tr('fontSize')),
             h('button', { type: 'button', className: 'ls-step', title: tr('fontSmaller'), 'aria-label': tr('fontSmaller'), onClick: () => { patch({ font: clamp(settingsRef.current.font - 2, 14, 36) }) } }, 'A−'),
             h('span', { className: 'ls-value' }, String(settings.font)),

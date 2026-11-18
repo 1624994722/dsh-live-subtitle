@@ -146,6 +146,54 @@ const TARGET_NAMES = {
   ko: 'Korean',
 }
 
+const SOURCE_NAMES = {
+  auto: 'detected automatically',
+  ja: 'Japanese',
+  en: 'English',
+  zh: 'Chinese',
+  yue: 'Cantonese',
+  ko: 'Korean',
+}
+
+const SOURCE_LANGUAGES = new Set(['auto', 'ja', 'en', 'zh', 'yue', 'ko'])
+
+/**
+ * @param {unknown} value - requested recognition language hint.
+ * @returns {string} a supported hint, or `auto`.
+ */
+function normalizeSource(value) {
+  return typeof value === 'string' && SOURCE_LANGUAGES.has(value) ? value : 'auto'
+}
+
+/**
+ * @param {unknown} value - requested translation style.
+ * @returns {'natural' | 'faithful'} the style.
+ */
+function normalizeStyle(value) {
+  return value === 'faithful' ? 'faithful' : 'natural'
+}
+
+/**
+ * Target-specific guidance that pushes the model away from translationese and
+ * toward the way a native subtitle writer would actually phrase the line.
+ * @param {string} target - target language tag.
+ * @returns {string} one paragraph of style direction.
+ */
+function subtitleStyle(target) {
+  switch (target) {
+    case 'zh-Hans':
+      return 'Write natural, colloquial Simplified Chinese the way a native subtitle writer would say it. Avoid 翻译腔 and 直译腔; do not keep English/Japanese word order or literal idioms. Keep each line short enough to read in one or two subtitle rows. Example: "Are you serious?" is 你认真的吗？, not 你是严肃的吗？.'
+    case 'zh-Hant':
+      return 'Write natural, colloquial Traditional Chinese the way a native subtitle writer would say it. Avoid 翻譯腔 and 直譯腔; do not keep foreign word order or literal idioms. Keep each line short enough to read in one or two subtitle rows.'
+    case 'ja':
+      return 'Write natural spoken Japanese (話し言葉). Avoid 直訳調 and 翻訳調, and do not default to stiff written Japanese. Use natural contractions and particles; choose 敬体 or 常体 from the surrounding scene and relationship; keep it short like a real subtitle. Example: "Are you serious?" is casual マジで？ or formal 本気ですか？ depending on the scene, never a word-for-word gloss.'
+    case 'ko':
+      return 'Write natural spoken Korean. Avoid translationese and literal calques; match the politeness level and relationship implied by the scene; keep it short like a real subtitle.'
+    default:
+      return 'Write natural, colloquial English. Avoid translationese and literal calques; keep it short like a real subtitle.'
+  }
+}
+
 /**
  * @param {string} target - BCP 47-like target tag.
  * @returns {string} a human-readable language name for the prompt.
@@ -161,7 +209,7 @@ function targetName(target) {
  * @param {object} options - text, target, recent context, cancellation, partial sink.
  * @returns {Promise<string>} the final translation.
  */
-async function translateWithLlm(web, { text, targetLanguage, context, signal, onPartial }) {
+async function translateWithLlm(web, { text, targetLanguage, sourceLanguage, style, draft, context, signal, onPartial }) {
   const llm = web.get('llm')
   if (llm === undefined) throw new Error('LLM 服务不可用')
   const registered = typeof llm.listProviders === 'function'
@@ -186,16 +234,44 @@ async function translateWithLlm(web, { text, targetLanguage, context, signal, on
     provider = chosen !== undefined && typeof chosen.provider === 'string' ? chosen.provider : 'deepseek-account'
     model = chosen !== undefined && typeof chosen.model === 'string' ? chosen.model : 'deepseek-flash'
   }
-  const recent = (context ?? []).map((line, index) => `#${index + 1} ${line.original}\n→ ${line.translation}`).join('\n')
-  const prompt = `${recent.length > 0 ? `Recent subtitles:\n${recent}\n\n` : ''}Translate this subtitle line into ${targetName(targetLanguage)}:\n${text}`
+  const recentLines = (context ?? []).slice(-4)
+  const recent = recentLines.map((line, index) => `#${index + 1} ${line.original}\n→ ${line.translation}`).join('\n')
+  const sourceHint = SOURCE_NAMES[sourceLanguage] ?? 'detected automatically'
+  const faithful = style === 'faithful'
+  const polishing = typeof draft === 'string' && draft.trim().length > 0
+  const prompt = polishing
+    ? `${recent.length > 0 ? `Recent subtitles (source → translation):\n${recent}\n\n` : ''}Source language: ${sourceHint}\nSource line: ${text}\nDraft translation: ${draft}\nRewrite the draft into ${targetName(targetLanguage)} so it sounds like a native subtitle writer's line.`
+    : `${recent.length > 0 ? `Recent subtitles (source → translation):\n${recent}\n\n` : ''}Source language: ${sourceHint}\nTranslate this subtitle line into ${targetName(targetLanguage)}:\n${text}`
+  const system = polishing
+    ? [
+      'You are a subtitle editor polishing a machine draft into a natural, colloquial line that a native subtitle writer would deliver.',
+      subtitleStyle(targetLanguage),
+      'Rules:',
+      '- Keep the exact meaning, tone, names and honorifics; do not add or remove information.',
+      '- Keep it about as long as the draft; subtitles must stay short.',
+      '- Output only the rewritten line: no explanations, quotes, notes, or alternatives.',
+    ].join('\n')
+    : [
+      'You are a professional live subtitle translator. Translate the MEANING and the speaker\'s intent, never word-for-word.',
+      faithful
+        ? 'Prefer a faithful, close rendering of the source; natural target syntax is still required.'
+        : subtitleStyle(targetLanguage),
+      'Rules:',
+      '- Output only the translation. No explanations, quotes, notes, labels, or alternative versions.',
+      '- Preserve who is speaking to whom, the tone and register shown by the recent subtitles (casual vs formal, polite vs blunt), personality, humor, sarcasm and implied meaning.',
+      '- Adapt idioms, puns and set phrases into natural target-language equivalents instead of translating them literally.',
+      '- Keep names, honorifics and recurring terminology consistent with the recent lines.',
+      '- Prefer short, speakable lines and do not add information that is not in the source.',
+      '- Before writing, silently infer the intent and relationship from the context; render that intent rather than the surface words.',
+    ].join('\n')
   let output = ''
   for await (const chunk of llm.stream({
     provider,
     model,
-    system: `You are a professional real-time subtitle translator. Translate into ${targetName(targetLanguage)} naturally and concisely, matching spoken style. Return only the translation. Use the recent subtitles only to resolve pronouns, names and terminology. Never explain or answer the content.`,
+    system,
     messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
     reasoningEffort: 'off',
-    temperature: 0.2,
+    temperature: polishing ? 0.5 : faithful ? 0.15 : 0.45,
     maxTokens: 512,
     signal,
   })) {
@@ -410,7 +486,7 @@ function helperFailure(stderr) {
  * @param {object} options - wiring.
  * @returns {object} session state.
  */
-function createSystemSession({ web, font, mode, target, surface, engine, onExit }) {
+function createSystemSession({ web, font, mode, target, surface, engine, sourceLanguage, style, polish, onExit }) {
   const subprocess = web.get('subprocess')
   if (subprocess === undefined) throw new Error('子进程服务不可用')
   if (!existsSync(HELPER_PATH)) throw new Error('缺少原生采集程序 bin/live-subtitle-helper')
@@ -424,6 +500,9 @@ function createSystemSession({ web, font, mode, target, surface, engine, onExit 
     handle,
     target,
     engine: engine === 'fast' ? 'fast' : 'smart',
+    sourceLanguage: normalizeSource(sourceLanguage),
+    style: normalizeStyle(style),
+    polish: polish !== false,
     seq: 0,
     lines: [],
     context: [],
@@ -453,7 +532,7 @@ function createSystemSession({ web, font, mode, target, surface, engine, onExit 
     const speech = web.get('speechToText')
     if (speech === undefined) return
     try {
-      const spec = speech.resolve({ audio: wav, language: 'auto' })
+      const spec = speech.resolve({ audio: wav, language: session.sourceLanguage })
       const transcript = await speech.transcribe(spec, AbortSignal.timeout(REQUEST_TIMEOUT_MS))
       const original = transcript.text.trim()
       if (original.length === 0) return
@@ -465,6 +544,8 @@ function createSystemSession({ web, font, mode, target, surface, engine, onExit 
           translation = await translateWithLlm(web, {
             text: original,
             targetLanguage: session.target,
+            sourceLanguage: session.sourceLanguage,
+            style: session.style,
             context: session.context,
             signal: AbortSignal.timeout(30_000),
             onPartial: (partial) => {
@@ -476,7 +557,10 @@ function createSystemSession({ web, font, mode, target, surface, engine, onExit 
           })
         } else {
           translation = await translateBing(web, {
-            text: original, targetLanguage: session.target, signal: AbortSignal.timeout(20_000),
+            text: original,
+            targetLanguage: session.target,
+            ...(session.sourceLanguage === 'auto' || session.sourceLanguage === 'yue' ? {} : { sourceLanguage: session.sourceLanguage }),
+            signal: AbortSignal.timeout(20_000),
           })
         }
       } catch (_translationFailure) {
@@ -490,7 +574,10 @@ function createSystemSession({ web, font, mode, target, surface, engine, onExit 
           }
           try {
             translation = await translateBing(web, {
-              text: original, targetLanguage: session.target, signal: AbortSignal.timeout(20_000),
+              text: original,
+              targetLanguage: session.target,
+              ...(session.sourceLanguage === 'auto' || session.sourceLanguage === 'yue' ? {} : { sourceLanguage: session.sourceLanguage }),
+              signal: AbortSignal.timeout(20_000),
             })
           } catch {
             translation = ''
@@ -498,6 +585,29 @@ function createSystemSession({ web, font, mode, target, surface, engine, onExit 
         }
       }
       if (!session.running) return
+      if (session.polish && session.engine === 'smart' && session.style === 'natural' && translation.trim().length > 0) {
+        let polishedPartial = 0
+        try {
+          const polished = await translateWithLlm(web, {
+            text: original,
+            targetLanguage: session.target,
+            sourceLanguage: session.sourceLanguage,
+            style: 'natural',
+            draft: translation,
+            context: session.context,
+            signal: AbortSignal.timeout(20_000),
+            onPartial: (partial) => {
+              const now = Date.now()
+              if (now - polishedPartial < 120) return
+              polishedPartial = now
+              if (session.running) write({ type: 'subtitle', original, translation: partial })
+            },
+          })
+          if (polished.trim().length > 0) translation = polished
+        } catch (_polishFailure) {
+          // Keep the first-pass draft when polishing fails.
+        }
+      }
       if (translation.length > 0) {
         session.context.push({ original, translation })
         if (session.context.length > 3) session.context.shift()
@@ -654,18 +764,45 @@ export function apply(ctx) {
         ? body.sourceLanguage
         : undefined
       const engine = body.engine === 'fast' ? 'fast' : 'smart'
+      const normalizedSource = normalizeSource(sourceLanguage)
       try {
         const signal = requestSignal(request)
         if (engine === 'smart') {
           try {
-            const translated = await translateWithLlm(web, { text, targetLanguage, signal })
+            let translated = await translateWithLlm(web, {
+              text,
+              targetLanguage,
+              sourceLanguage: normalizedSource,
+              style: normalizeStyle(body.style),
+              signal,
+            })
+            if (body.polish !== false && normalizeStyle(body.style) === 'natural' && translated.trim().length > 0) {
+              try {
+                const polished = await translateWithLlm(web, {
+                  text,
+                  targetLanguage,
+                  sourceLanguage: normalizedSource,
+                  style: 'natural',
+                  draft: translated,
+                  signal,
+                })
+                if (polished.trim().length > 0) translated = polished
+              } catch (_polishFailure) {
+                // Keep the first-pass result.
+              }
+            }
             return respond(200, { ok: true, text: translated })
           } catch (error) {
             if (signal.aborted) throw error
             // Fall through to the configured translator when the chat model is unavailable.
           }
         }
-        const translated = await translateBing(web, { text, targetLanguage, sourceLanguage, signal })
+        const translated = await translateBing(web, {
+          text,
+          targetLanguage,
+          ...(normalizedSource === 'auto' || normalizedSource === 'yue' ? {} : { sourceLanguage: normalizedSource }),
+          signal,
+        })
         return respond(200, { ok: true, text: translated })
       } catch (error) {
         return failure(502, 'translation-failed', messageOf(error))
@@ -686,10 +823,13 @@ export function apply(ctx) {
       const target = typeof settings.target === 'string' && settings.target.length > 0 ? settings.target : 'zh-Hans'
       const surface = settings.surface === 'desktop' ? 'desktop' : 'floating'
       const engine = settings.engine === 'fast' ? 'fast' : 'smart'
+      const sourceLanguage = normalizeSource(settings.sourceLanguage)
+      const style = normalizeStyle(settings.style)
+      const polish = settings.polish !== false
       let session
       try {
         session = createSystemSession({
-          web, font, mode, target, surface, engine,
+          web, font, mode, target, surface, engine, sourceLanguage, style, polish,
           onExit: (ended) => { if (system === ended) system = null },
         })
         system = session
@@ -717,6 +857,9 @@ export function apply(ctx) {
       const settings = body === undefined ? {} : body
       if (typeof settings.target === 'string' && settings.target.length > 0) system.target = settings.target
       if (settings.engine === 'fast' || settings.engine === 'smart') system.engine = settings.engine
+      if (settings.sourceLanguage !== undefined) system.sourceLanguage = normalizeSource(settings.sourceLanguage)
+      if (settings.style !== undefined) system.style = normalizeStyle(settings.style)
+      if (settings.polish !== undefined) system.polish = settings.polish !== false
       const command = { type: 'config' }
       if (Number.isFinite(settings.font)) command.font = Math.min(44, Math.max(14, settings.font))
       if (typeof settings.mode === 'string') command.mode = settings.mode
