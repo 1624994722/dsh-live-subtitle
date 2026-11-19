@@ -5,6 +5,13 @@ bin/live-subtitle-helper.exe
 # Release artifacts
 dist/
 
+# Android build outputs and local config
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/libs/*.aar
+
 # Tooling
 node_modules/
 .DS_Store

@@ -11,11 +11,14 @@
 
 从本仓库的 **Releases** 下载最新的 `dsh-live-subtitle-<version>.zip`（内含 macOS 通用原生助手），按下面的「安装」步骤使用。
 
+Android 独立 App 见 [android/README.md](android/README.md)，APK 在 Releases 的 `android-v0.1.0` 标签下。
+
 ## 平台支持
 
 | 平台 | 系统声音 | 置顶/桌面浮窗 | 说明 |
 |---|---|---|---|
 | macOS 13+（Apple Silicon / Intel） | ✅ ScreenCaptureKit | ✅ 原生浮窗 + 桌面挂件 | 需要「屏幕录制」权限；插件自带通用二进制 |
+| Android 10+ | ✅ AudioPlaybackCapture（受 App 限制） | ✅ 独立悬浮字幕窗 | 手机本地 SenseVoice + DeepSeek 翻译；[android/README.md](android/README.md)，debug 版待真机完整验证 |
 | Windows 10/11 | ⚠️ 通过「立体声混音」或 VB-Cable 作为麦克风输入 | ⚠️ 字幕在 DSH 窗口内的浮层里 | 暂无 Windows 原生采集/置顶窗助手；可使用系统自带立体声混音或安装 VB-Cable 后选为输入设备 |
 | Linux | ⚠️ 麦克风 / PulseAudio monitor | ⚠️ DSH 内浮层 | 同上，无原生助手 |
 
@@ -109,6 +112,7 @@ xattr -dr com.apple.quarantine /path/to/dsh-live-subtitle-1.0.0
 | `bin/live-subtitle-helper` | macOS 通用原生助手（采集 + 浮窗/桌面挂件） |
 | `native/LiveSubtitleHelper.swift` | 助手源码 |
 | `native/build.sh` | 通用二进制构建脚本 |
+| `android/` | Android 独立 App 源码（构建说明见 `android/README.md`） |
 | `locale/` `icon.svg` | 插件页显示信息 |
 
 ## 已知限制
